@@ -41,11 +41,14 @@ function toGemini(messages: Message[]) {
 function getStopReason(
   finishReason: string | undefined,
 ): StopReason {
-  if (finishReason === "MAX_TOKENS") {
-    return "length";
-  }
+  switch (finishReason) {
+    case "MAX_TOKENS":
+      return "length";
 
-  return "stop";
+    case "STOP":
+    default:
+      return "stop";
+  }
 }
 
 export function createGemini(): Provider {
@@ -68,43 +71,59 @@ export function createGemini(): Provider {
     }: StreamOptions) {
       const contents = toGemini(messages);
 
-      const stream = await client.models.generateContentStream({
-        model,
-        contents,
-        config: system
-          ? {
-              systemInstruction: system,
-            }
-          : undefined,
-      });
-
       let text = "";
       let finishReason: string | undefined;
       let inputTokens = 0;
       let outputTokens = 0;
 
-      for await (const chunk of stream) {
-        const delta = chunk.text;
+      try {
+        const stream = await client.models.generateContentStream({
+          model,
+          contents,
+          config: system
+            ? {
+                systemInstruction: system,
+              }
+            : undefined,
+        });
 
-        if (delta) {
-          text += delta;
+        for await (const chunk of stream) {
+          const delta = chunk.text;
 
-          yield {
-            type: "text_delta",
-            delta,
-          };
+          if (delta) {
+            text += delta;
+
+            yield {
+              type: "text_delta",
+              delta,
+            };
+          }
+
+          const candidate = chunk.candidates?.[0];
+
+          if (candidate?.finishReason) {
+            finishReason = candidate.finishReason;
+          }
+
+          if (chunk.usageMetadata) {
+            inputTokens =
+              chunk.usageMetadata.promptTokenCount ??
+              inputTokens;
+
+            outputTokens =
+              chunk.usageMetadata.candidatesTokenCount ??
+              outputTokens;
+          }
         }
-
-        finishReason =
-          chunk.candidates?.[0]?.finishReason ?? finishReason;
-
-        if (chunk.usageMetadata) {
-          inputTokens =
-            chunk.usageMetadata.promptTokenCount ?? inputTokens;
-
-          outputTokens =
-            chunk.usageMetadata.candidatesTokenCount ?? outputTokens;
-        }
+      } catch (error) {
+        throw new Error(
+          `Gemini streaming failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          {
+            cause: error,
+          },
+        );
       }
 
       const content: ContentBlock[] = text

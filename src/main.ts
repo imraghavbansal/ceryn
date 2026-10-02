@@ -10,12 +10,19 @@ config({
 });
 
 async function main() {
+  const prompt = process.argv.slice(2).join(" ").trim();
+
+  if (!prompt) {
+    console.error("Usage: ceryn <prompt>");
+    process.exit(1);
+  }
+
   const provider = getProvider("gemini");
 
   const messages: Message[] = [
     {
       role: "user",
-      content: "Explain quantum computing in simple terms.",
+      content: prompt,
     },
   ];
 
