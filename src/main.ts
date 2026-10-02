@@ -1,25 +1,44 @@
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
-import { GoogleGenAI } from "@google/genai";
+
+import { getProvider } from "./providers/index.ts";
+import type { Message } from "./types.ts";
 
 config({
   path: fileURLToPath(new URL("../.env", import.meta.url)),
   quiet: true,
 });
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
-
 async function main() {
-  const prompt = "Explain quantum computing in simple terms.";
+  const provider = getProvider("gemini");
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
-    contents: prompt,
-  });
+  const messages: Message[] = [
+    {
+      role: "user",
+      content: "Explain quantum computing in simple terms.",
+    },
+  ];
 
-  console.log(response.text);
+  for await (
+    const event of provider.stream({
+      messages,
+      model: provider.defaultModel,
+    })
+  ) {
+    if (event.type === "text_delta") {
+      process.stdout.write(event.delta);
+    }
+
+    if (event.type === "done") {
+      console.log("\n\n---");
+      console.log("Provider:", provider.name);
+      console.log("Usage:", event.message.usage);
+      console.log("Stop reason:", event.message.stopReason);
+    }
+  }
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error("\nCeryn error:", error);
+  process.exit(1);
+});
